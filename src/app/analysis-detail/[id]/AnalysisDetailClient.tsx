@@ -15,8 +15,8 @@ import {
   CalendarIcon,
   RefreshCwIcon,
   DownloadIcon
-  // BrainIcon
 } from 'lucide-react';
+import jsPDF from 'jspdf';
 import { ArticleData, WordCloudData } from '@/types/api';
 // import { AIEnhancedInsights, AIProcessingState } from '@/types/aiInsights';
 import ArticleDetail from '@/components/ArticleDetail';
@@ -109,25 +109,81 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
       .sort((a, b) => b.interactiveRate - a.interactiveRate)
       .slice(0, 5);
 
-    const reportData = {
-      keyword: detail.keyword,
-      totalArticles: detail.articles.length,
-      wordCloud: detail.wordCloud,
-      insights: detail.insights,
-      topLikedArticles,
-      topInteractiveArticles,
-      generatedAt: new Date(detail.searchTime).toLocaleString('zh-CN')
-    };
+    // 创建PDF
+    const pdf = new jsPDF();
 
-    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `选题分析报告_${detail.keyword}_${detail.searchTime}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // 设置字体（支持中文）
+    pdf.setFont('helvetica');
+
+    // 添加标题
+    pdf.setFontSize(20);
+    pdf.text('选题分析报告', 105, 20, { align: 'center' });
+
+    // 添加基本信息
+    pdf.setFontSize(12);
+    pdf.text(`关键词: ${detail.keyword}`, 20, 40);
+    pdf.text(`分析时间: ${formatDate(detail.searchTime)}`, 20, 50);
+    pdf.text(`文章总数: ${detail.articles.length}`, 20, 60);
+
+    // 添加分割线
+    pdf.setLineWidth(0.5);
+    pdf.line(20, 70, 190, 70);
+
+    // 热门文章
+    pdf.setFontSize(16);
+    pdf.text('热门文章 TOP 5', 20, 85);
+    pdf.setFontSize(10);
+
+    topLikedArticles.forEach((article, index) => {
+      const yPosition = 95 + (index * 15);
+      pdf.text(`${index + 1}. ${article.title.substring(0, 50)}${article.title.length > 50 ? '...' : ''}`, 25, yPosition);
+      pdf.setFontSize(8);
+      pdf.text(`阅读: ${article.readCount} | 点赞: ${article.likeCount} | 评论: ${article.commentCount}`, 25, yPosition + 5);
+    });
+
+    // 互动率最高的文章
+    pdf.setFontSize(16);
+    pdf.text('互动率最高文章 TOP 5', 20, 200);
+    pdf.setFontSize(10);
+
+    topInteractiveArticles.forEach((article, index) => {
+      const yPosition = 210 + (index * 15);
+      pdf.text(`${index + 1}. ${article.title.substring(0, 50)}${article.title.length > 50 ? '...' : ''}`, 25, yPosition);
+      pdf.setFontSize(8);
+      pdf.text(`阅读: ${article.readCount} | 点赞: ${article.likeCount} | 评论: ${article.commentCount} | 互动率: ${(article.interactiveRate * 100).toFixed(1)}%`, 25, yPosition + 5);
+    });
+
+    // 词云数据（显示前10个）
+    if (detail.wordCloud && detail.wordCloud.length > 0) {
+      pdf.setFontSize(16);
+      pdf.text('关键词云', 20, 305);
+      pdf.setFontSize(10);
+
+      const topWords = detail.wordCloud.slice(0, 10);
+      topWords.forEach((word, index) => {
+        const yPosition = 315 + (index * 12);
+        pdf.text(`${word.text} (${word.count}次)`, 25, yPosition);
+      });
+    }
+
+    // 选题洞察
+    if (detail.insights && detail.insights.length > 0) {
+      pdf.setFontSize(16);
+      pdf.text('选题洞察', 20, 450);
+      pdf.setFontSize(10);
+
+      detail.insights.forEach((insight, index) => {
+        const yPosition = 460 + (index * 15);
+        pdf.text(`• ${insight}`, 25, yPosition);
+      });
+    }
+
+    // 添加生成时间
+    pdf.setFontSize(8);
+    pdf.text(`报告生成时间: ${new Date().toLocaleString('zh-CN')}`, 20, 280);
+
+    // 保存PDF
+    pdf.save(`选题分析报告_${detail.keyword}_${detail.searchTime}.pdf`);
   };
 
   // 格式化时间
