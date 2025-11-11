@@ -1,9 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { SearchIcon, TrendingUpIcon, EyeIcon, HeartIcon, AlertCircleIcon, BarChart3Icon, ThumbsUpIcon, ActivityIcon, SaveIcon, DatabaseIcon } from 'lucide-react';
+import { SearchIcon, TrendingUpIcon, EyeIcon, HeartIcon, AlertCircleIcon, BarChart3Icon, ThumbsUpIcon, ActivityIcon, SaveIcon, DatabaseIcon, BrainIcon } from 'lucide-react';
 import { fetchWeChatArticles, extractKeywords, generateInsights } from '@/services/wechatApi';
 import { ArticleData, WordCloudData } from '@/types/api';
+import AIAnalysisProgress from './AIAnalysisProgress';
+import AIInsightsDisplay from './AIInsightsDisplay';
+import { AIEnhancedInsights } from '@/types/aiInsights';
 
 export default function Analysis() {
   const [keyword, setKeyword] = useState('');
@@ -18,6 +21,15 @@ export default function Analysis() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [databaseInitialized, setDatabaseInitialized] = useState(false);
+
+  // AI Analysis states
+  const [isAIAnalyzing, setIsAIAnalyzing] = useState(false);
+  const [aiAnalysisProgress, setAiAnalysisProgress] = useState(0);
+  const [aiAnalysisStep, setAiAnalysisStep] = useState('');
+  const [aiAnalysisError, setAiAnalysisError] = useState<string>('');
+  const [aiAnalysisVisible, setAiAnalysisVisible] = useState(false);
+  const [aiInsights, setAiInsights] = useState<AIEnhancedInsights | null>(null);
+  const [currentAnalysisId, setCurrentAnalysisId] = useState<string>('');
 
   // 初始化数据库
   useEffect(() => {
@@ -38,8 +50,9 @@ export default function Analysis() {
     initializeDatabase();
 
     // 从URL参数中获取关键词
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlKeyword = urlParams.get('keyword');
+    const urlKeyword = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('keyword')
+      : null;
     if (urlKeyword) {
       setKeyword(urlKeyword);
       // 延迟执行分析，确保组件完全加载
@@ -153,6 +166,75 @@ export default function Analysis() {
     }
   };
 
+  // AI深度分析函数
+  const handleAIAnalysis = async () => {
+    if (!keyword.trim() || articles.length === 0) return;
+
+    setIsAIAnalyzing(true);
+    setAiAnalysisError('');
+    setAiAnalysisVisible(true);
+    setAiAnalysisProgress(0);
+    setAiAnalysisStep('准备开始AI分析...');
+
+    // 生成分析ID
+    const analysisId = `ai_analysis_${Date.now()}`;
+    setCurrentAnalysisId(analysisId);
+
+    try {
+      const response = await fetch('/api/ai-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          searchId: analysisId,
+          keyword,
+          articles: articles.slice(0, 5), // 只分析TOP 5文章
+          options: {
+            maxArticles: 5,
+            includeSentiment: true,
+            includeOpportunities: true,
+            model: 'deepseek-chat'
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `API请求失败: ${response.status}`);
+      }
+
+      const aiResult = await response.json();
+
+      if (aiResult && aiResult.success && aiResult.data) {
+        setAiInsights(aiResult.data);
+        setAiAnalysisProgress(100);
+        setAiAnalysisStep('AI分析完成！');
+
+        // 2秒后隐藏进度条
+        setTimeout(() => {
+          setAiAnalysisVisible(false);
+        }, 2000);
+      } else {
+        throw new Error(aiResult?.error || 'AI分析返回无效结果');
+      }
+    } catch (error) {
+      console.error('AI分析失败:', error);
+      setAiAnalysisError(error instanceof Error ? error.message : 'AI分析失败，请稍后重试');
+    } finally {
+      setIsAIAnalyzing(false);
+    }
+  };
+
+  // 取消AI分析
+  const handleCancelAIAnalysis = () => {
+    setAiAnalysisVisible(false);
+    setIsAIAnalyzing(false);
+    setAiAnalysisError('');
+    setAiAnalysisProgress(0);
+    setAiAnalysisStep('');
+  };
+
   const topLikedArticles = [...articles]
     .sort((a, b) => b.likeCount - a.likeCount)
     .slice(0, 5);
@@ -220,25 +302,41 @@ export default function Analysis() {
 
       {/* 搜索栏 */}
       <div className="card">
-        <div className="flex space-x-4">
-          <div className="flex-1">
-            <input
-              type="text"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="请输入关键词进行选题分析..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              onKeyDown={(e) => e.key === 'Enter' && handleAnalyzeWithReset()}
-            />
+        <div className="flex flex-col space-y-4">
+          <div className="flex space-x-4">
+            <div className="flex-1">
+              <input
+                type="text"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder="请输入关键词进行选题分析..."
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                onKeyDown={(e) => e.key === 'Enter' && handleAnalyzeWithReset()}
+              />
+            </div>
+            <button
+              onClick={handleAnalyzeWithReset}
+              disabled={isAnalyzing || !keyword.trim()}
+              className="btn btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <SearchIcon className="w-4 h-4" />
+              <span>{isAnalyzing ? '分析中...' : '开始分析'}</span>
+            </button>
           </div>
-          <button
-            onClick={handleAnalyzeWithReset}
-            disabled={isAnalyzing || !keyword.trim()}
-            className="btn btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <SearchIcon className="w-4 h-4" />
-            <span>{isAnalyzing ? '分析中...' : '开始分析'}</span>
-          </button>
+
+          {/* AI深度分析按钮 */}
+          {articles.length > 0 && (
+            <div className="flex justify-center">
+              <button
+                onClick={handleAIAnalysis}
+                disabled={isAIAnalyzing}
+                className="btn bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              >
+                <BrainIcon className="w-4 h-4" />
+                <span>{isAIAnalyzing ? 'AI分析中...' : 'AI 深度分析'}</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -253,6 +351,25 @@ export default function Analysis() {
           </div>
         </div>
       )}
+
+      {/* AI分析进度组件 */}
+      <AIAnalysisProgress
+        isVisible={aiAnalysisVisible}
+        progress={aiAnalysisProgress}
+        currentStep={aiAnalysisStep}
+        error={aiAnalysisError}
+        onCancel={handleCancelAIAnalysis}
+        searchId={currentAnalysisId}
+        totalArticles={Math.min(articles.length, 5)}
+        processedArticles={Math.min(Math.floor(aiAnalysisProgress / 20), Math.min(articles.length, 5))}
+      />
+
+      {/* AI洞察结果展示 */}
+      <AIInsightsDisplay
+        insights={aiInsights}
+        isLoading={isAIAnalyzing}
+        error={aiAnalysisError}
+      />
 
       {reportGenerated && (
         <>
@@ -488,7 +605,11 @@ export default function Analysis() {
           <div className="flex flex-col sm:flex-row justify-center items-center space-y-3 sm:space-y-0 sm:space-x-4">
             <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4">
               <button
-                onClick={() => window.location.href = '/create'}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.location.href = '/create';
+                  }
+                }}
                 className="btn btn-primary"
               >
                 基于此洞察创作内容
@@ -565,7 +686,11 @@ export default function Analysis() {
 
             {/* 查看历史按钮 */}
             <button
-              onClick={() => window.location.href = '/history'}
+              onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.location.href = '/history';
+                  }
+                }}
               className="btn btn-outline flex items-center space-x-2"
             >
               <DatabaseIcon className="w-4 h-4" />

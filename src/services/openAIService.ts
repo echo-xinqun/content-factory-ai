@@ -53,7 +53,18 @@ export class OpenAIService {
    * 发送聊天完成请求
    */
   async chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
-    const url = `${this.config.baseURL || 'https://api.openai.com'}/v1/chat/completions`;
+    const baseURL = this.config.baseURL || 'https://api.openai.com';
+    let url: string;
+
+    // 特殊处理DeepSeek API
+    if (baseURL.includes('api.deepseek.com')) {
+      url = `${baseURL}/chat/completions`;
+    } else {
+      // OpenAI和其他兼容API的处理
+      url = baseURL.endsWith('/v1')
+        ? `${baseURL}/chat/completions`
+        : `${baseURL}/v1/chat/completions`;
+    }
 
     const requestBody = {
       model: request.model || this.config.model,
@@ -73,11 +84,13 @@ export class OpenAIService {
         const response = await fetch(url, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json; charset=utf-8',
             'Authorization': `Bearer ${this.config.apiKey}`,
             ...(this.config.baseURL && !this.config.baseURL.includes('api.openai.com') && {
-              'HTTP-Referer': window.location.origin,
-              'X-Title': '内容工厂'
+              'HTTP-Referer': process.env.NODE_ENV === 'production'
+                ? process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+                : 'http://localhost:3000',
+              'X-Title': 'ContentFactory'
             })
           },
           body: JSON.stringify(requestBody),
@@ -143,15 +156,23 @@ export class OpenAIService {
    */
   async sendJSONPrompt<T>(prompt: string, systemPrompt?: string): Promise<T> {
     const jsonSystemPrompt = systemPrompt
-      ? `${systemPrompt}\n\n请严格按照JSON格式回复，不要包含任何其他文本或解释。`
-      : '请严格按照JSON格式回复，不要包含任何其他文本或解释。';
+      ? `${systemPrompt}\n\n请严格按照JSON格式回复，不要包含任何其他文本或解释，不要使用markdown代码块。`
+      : '请严格按照JSON格式回复，不要包含任何其他文本或解释，不要使用markdown代码块。';
 
     const response = await this.sendPrompt(prompt, jsonSystemPrompt);
 
     try {
-      // 尝试解析JSON
-      const jsonMatch = response.match(/\\{[\\s\\S]*\\}/);
-      const jsonString = jsonMatch ? jsonMatch[0] : response;
+      // 尝试解析JSON，处理可能的markdown代码块
+      let jsonString = response;
+
+      // 移除markdown代码块标记
+      jsonString = jsonString.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+
+      // 查找JSON对象
+      const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonString = jsonMatch[0];
+      }
 
       return JSON.parse(jsonString) as T;
     } catch (error) {
@@ -164,7 +185,18 @@ export class OpenAIService {
    * 流式聊天完成（为将来扩展预留）
    */
   async *chatCompletionStream(request: ChatCompletionRequest): AsyncGenerator<string, void, unknown> {
-    const url = `${this.config.baseURL || 'https://api.openai.com'}/v1/chat/completions`;
+    const baseURL = this.config.baseURL || 'https://api.openai.com';
+    let url: string;
+
+    // 特殊处理DeepSeek API
+    if (baseURL.includes('api.deepseek.com')) {
+      url = `${baseURL}/chat/completions`;
+    } else {
+      // OpenAI和其他兼容API的处理
+      url = baseURL.endsWith('/v1')
+        ? `${baseURL}/chat/completions`
+        : `${baseURL}/v1/chat/completions`;
+    }
 
     const requestBody = {
       ...request,
@@ -262,7 +294,10 @@ export class OpenAIService {
         message.includes('500') ||
         message.includes('502') ||
         message.includes('503') ||
-        message.includes('504')
+        message.includes('504') ||
+        message.includes('temporary') ||
+        message.includes('overloaded') ||
+        message.includes('deepseek') && message.includes('busy')
       );
     }
     return false;
@@ -293,7 +328,7 @@ export class OpenAIService {
         };
       }
 
-      if (message.includes('rate limit')) {
+      if (message.includes('rate limit') || message.includes('too many requests')) {
         return {
           type: AnalysisErrorType.RATE_LIMIT_ERROR,
           message: `API调用频率限制: ${error.message}`,
@@ -311,9 +346,27 @@ export class OpenAIService {
         };
       }
 
+      if (message.includes('quota') || message.includes('balance') || message.includes('insufficient')) {
+        return {
+          type: AnalysisErrorType.QUOTA_ERROR,
+          message: `API配额不足: ${error.message}`,
+          timestamp: Date.now(),
+          retryable: false
+        };
+      }
+
+      if (message.includes('busy') || message.includes('overloaded') || message.includes('temporary')) {
+        return {
+          type: AnalysisErrorType.SERVER_ERROR,
+          message: `AI服务暂时繁忙: ${error.message}`,
+          timestamp: Date.now(),
+          retryable: true
+        };
+      }
+
       return {
         type: AnalysisErrorType.API_ERROR,
-        message: `API错误: ${error.message}`,
+        message: `AI分析服务错误: ${error.message}`,
         timestamp: Date.now(),
         retryable: true
       };
@@ -343,22 +396,43 @@ let defaultOpenAIService: OpenAIService | null = null;
  */
 export function getOpenAIService(): OpenAIService {
   if (!defaultOpenAIService) {
-    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    // 优先使用DeepSeek配置
+    const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
+    const deepSeekBaseURL = process.env.DEEPSEEK_BASE_URL;
+    const deepSeekModel = process.env.DEEPSEEK_MODEL;
 
-    if (!apiKey) {
-      throw new Error('OpenAI API密钥未配置');
+    if (deepSeekApiKey && deepSeekBaseURL) {
+      console.log('使用DeepSeek API服务');
+      defaultOpenAIService = new OpenAIService({
+        apiKey: deepSeekApiKey,
+        model: deepSeekModel || 'deepseek-chat',
+        baseURL: deepSeekBaseURL,
+        maxTokens: parseInt(process.env.AI_MAX_TOKENS || '4000'),
+        temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+        timeout: parseInt(process.env.AI_TIMEOUT || '60000'),
+        retryAttempts: parseInt(process.env.AI_RETRY_ATTEMPTS || '3'),
+        retryDelay: parseInt(process.env.AI_RETRY_DELAY || '1000')
+      });
+    } else {
+      // 回退到OpenAI配置
+      const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+      if (!apiKey) {
+        throw new Error('AI API密钥未配置，请设置DEEPSEEK_API_KEY或OPENAI_API_KEY');
+      }
+
+      console.log('使用OpenAI API服务');
+      defaultOpenAIService = new OpenAIService({
+        apiKey,
+        model: process.env.AI_MODEL || process.env.OPENAI_MODEL || 'gpt-4',
+        baseURL: process.env.OPENAI_BASE_URL,
+        maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '4000'),
+        temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
+        timeout: parseInt(process.env.OPENAI_TIMEOUT || '60000'),
+        retryAttempts: parseInt(process.env.OPENAI_RETRY_ATTEMPTS || '3'),
+        retryDelay: parseInt(process.env.OPENAI_RETRY_DELAY || '1000')
+      });
     }
-
-    defaultOpenAIService = new OpenAIService({
-      apiKey,
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      baseURL: process.env.OPENAI_BASE_URL,
-      maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '4000'),
-      temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
-      timeout: parseInt(process.env.OPENAI_TIMEOUT || '60000'),
-      retryAttempts: parseInt(process.env.OPENAI_RETRY_ATTEMPTS || '3'),
-      retryDelay: parseInt(process.env.OPENAI_RETRY_DELAY || '1000')
-    });
   }
 
   return defaultOpenAIService;

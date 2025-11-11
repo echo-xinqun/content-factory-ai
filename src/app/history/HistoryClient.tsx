@@ -62,7 +62,9 @@ export default function HistoryClient() {
 
   // 重新分析
   const reAnalyze = (keyword: string) => {
-    window.location.href = `/analysis?keyword=${encodeURIComponent(keyword)}`;
+    if (typeof window !== 'undefined') {
+      window.location.href = `/analysis?keyword=${encodeURIComponent(keyword)}`;
+    }
   };
 
   // 查看详情
@@ -159,7 +161,11 @@ export default function HistoryClient() {
           <h3 className="text-lg font-medium text-gray-900 mb-2">暂无分析历史</h3>
           <p className="text-gray-600 mb-4">开始选题分析后，历史记录将显示在这里</p>
           <button
-            onClick={() => window.location.href = '/analysis'}
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.location.href = '/analysis';
+              }
+            }}
             className="btn btn-primary"
           >
             开始分析

@@ -172,7 +172,11 @@ export default function Dashboard() {
           </button>
 
           <button
-            onClick={() => window.location.href = '/history'}
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.location.href = '/history';
+              }
+            }}
             className="flex items-center space-x-3 px-6 py-3 rounded-lg hover:bg-gray-50 transition-colors group"
           >
             <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 transition-colors">

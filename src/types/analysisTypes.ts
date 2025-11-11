@@ -99,6 +99,8 @@ export enum AnalysisErrorType {
   VALIDATION_ERROR = 'validation_error',
   INSUFFICIENT_DATA = 'insufficient_data',
   RATE_LIMIT_ERROR = 'rate_limit_error',
+  QUOTA_ERROR = 'quota_error',
+  SERVER_ERROR = 'server_error',
   UNKNOWN_ERROR = 'unknown_error'
 }
 

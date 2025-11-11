@@ -14,14 +14,19 @@ import {
   ActivityIcon,
   CalendarIcon,
   RefreshCwIcon,
-  DownloadIcon
+  DownloadIcon,
+  SaveIcon,
+  DatabaseIcon,
+  BrainIcon,
+  CheckCircleIcon
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { ArticleData, WordCloudData } from '@/types/api';
-// import { AIEnhancedInsights, AIProcessingState } from '@/types/aiInsights';
+import { AIEnhancedInsights, AIProcessingState } from '@/types/aiInsights';
 import ArticleDetail from '@/components/ArticleDetail';
-// import AIInsightsPanel from '@/components/AIInsightsPanel';
-// import AIProcessingIndicator, { CompactAIProcessingIndicator } from '@/components/AIProcessingIndicator';
+import AIInsightsPanel from '@/components/AIInsightsPanel';
+import AIAnalysisProgress from '@/components/AIAnalysisProgress';
+import AIInsightsDisplay from '@/components/AIInsightsDisplay';
 
 interface SearchHistoryDetail {
   id: number;
@@ -46,29 +51,54 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
   const articlesPerPage = 5;
   const [selectedArticle, setSelectedArticle] = useState<ArticleData | null>(null);
   const [isArticleModalOpen, setIsArticleModalOpen] = useState(false);
-  // const [aiInsights, setAiInsights] = useState<AIEnhancedInsights | null>(null);
-  // const [aiProcessingState, setAiProcessingState] = useState<AIProcessingState>({
-  //   status: 'idle',
-  //   progress: 0,
-  //   currentStep: ''
-  // });
-  // const [aiError, setAiError] = useState<string>('');
+  const [aiInsights, setAiInsights] = useState<AIEnhancedInsights | null>(null);
+  const [aiProcessingState, setAiProcessingState] = useState<AIProcessingState>({
+    status: 'idle',
+    progress: 0,
+    currentStep: ''
+  });
+  const [aiError, setAiError] = useState<string>('');
+  const [aiAnalysisVisible, setAiAnalysisVisible] = useState(false);
+  const [currentAnalysisId, setCurrentAnalysisId] = useState<string>('');
   const router = useRouter();
 
-  // 加载AI洞察 - 临时禁用
-  // const loadAIInsights = async (searchId: number) => {
-  //   try {
-  //     const response = await fetch(`/api/search-history/${searchId}`);
-  //     const result = await response.json();
+  // 保存状态
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [saveMessage, setSaveMessage] = useState<string>('');
 
-  //     if (result.success && result.data.aiInsights) {
-  //       setAiInsights(result.data.aiInsights);
-  //     }
-  //   } catch (error) {
-  //     console.error('Error loading AI insights:', error);
-  //     // 不设置错误，因为AI洞察是可选的
-  //   }
-  // };
+  // 加载AI洞察
+  const loadAIInsights = async (searchId: number) => {
+    try {
+      console.log(`🔍 开始加载AI洞察，searchId: ${searchId}`);
+      const response = await fetch(`/api/ai-analysis/${searchId}`);
+      console.log(`📡 AI洞察API响应状态: ${response.status}`);
+
+      if (!response.ok) {
+        console.log('⚠️ 没有找到保存的AI分析结果 (这是正常的)');
+        return;
+      }
+
+      const result = await response.json();
+      console.log('📦 AI洞察API响应成功，数据键:', Object.keys(result));
+
+      if (result.success && result.data) {
+        setAiInsights(result.data);
+        console.log('✅ 已成功加载保存的AI分析结果，包含:', {
+          basicInsights: !!result.data.basicInsights,
+          aiAnalysis: !!result.data.aiAnalysis,
+          topicInsights: result.data.aiAnalysis?.topicInsights?.length || 0,
+          articleSummaries: result.data.aiAnalysis?.articleSummaries?.length || 0
+        });
+      } else {
+        console.log('❌ 没有AI分析结果可加载');
+      }
+    } catch (error) {
+      console.error('❌ Error loading AI insights:', error);
+      // 确保设置一个默认的空状态，防止渲染错误
+      setAiInsights(null);
+    }
+  };
 
   // 加载分析详情
   const loadAnalysisDetail = async () => {
@@ -79,8 +109,8 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
 
       if (result.success) {
         setDetail(result.data);
-        // 尝试加载已有的AI洞察 - 临时禁用
-        // await loadAIInsights(parseInt(id));
+        // 尝试加载已有的AI洞察
+        await loadAIInsights(parseInt(id));
       } else {
         setError(result.error || '加载分析详情失败');
       }
@@ -92,9 +122,177 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
     }
   };
 
+  // AI深度分析函数
+  const handleAIAnalysis = async () => {
+    if (!detail || detail.articles.length === 0) return;
+
+    // 过滤掉空内容的文章，只分析有内容的文章
+    const validArticles = detail.articles.filter(article =>
+      article.content && (article.content.trim() || article.summary?.trim())
+    );
+
+    if (validArticles.length === 0) {
+      setAiError('没有找到包含有效内容的文章，暂时无法进行AI分析。请稍后重试。');
+      setAiAnalysisVisible(true);
+      setAiProcessingState({
+        status: 'error',
+        progress: 0,
+        currentStep: '没有有效文章内容'
+      });
+      return;
+    }
+
+    // 如果有文章被过滤掉，显示提示信息
+    if (validArticles.length < detail.articles.length) {
+      console.log(`跳过 ${detail.articles.length - validArticles.length} 篇空内容文章，将分析 ${validArticles.length} 篇有效文章`);
+    }
+
+    setAiProcessingState({
+      status: 'processing',
+      progress: 0,
+      currentStep: '准备开始AI分析...'
+    });
+    setAiAnalysisVisible(true);
+    setAiError('');
+
+    // 生成分析ID
+    const analysisId = `ai_analysis_history_${detail.id}_${Date.now()}`;
+    setCurrentAnalysisId(analysisId);
+
+    try {
+      // 模拟进度更新
+      const progressSteps = [
+        { progress: 20, step: '分析文章内容...' },
+        { progress: 40, step: '生成文章摘要...' },
+        { progress: 60, step: '提取关键信息...' },
+        { progress: 80, step: '生成选题洞察...' },
+        { progress: 95, step: '分析完成...' }
+      ];
+
+      // 显示初始进度
+      progressSteps.forEach((step, index) => {
+        setTimeout(() => {
+          setAiProcessingState({
+            status: 'processing',
+            progress: step.progress,
+            currentStep: step.step
+          });
+        }, index * 8000); // 每8秒更新一次进度，总时长约40秒
+      });
+
+      const response = await fetch('/api/ai-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          searchId: detail.id.toString(),
+          keyword: detail.keyword,
+          articles: validArticles.slice(0, 5), // 只分析有效文章中的TOP 5篇
+          options: {
+            maxArticles: 5,
+            includeSentiment: true,
+            includeOpportunities: true,
+            model: 'deepseek-chat'
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `API请求失败: ${response.status}`);
+      }
+
+      const aiResult = await response.json();
+
+      if (aiResult && aiResult.success && aiResult.data) {
+        setAiInsights(aiResult.data);
+        setAiProcessingState({
+          status: 'completed',
+          progress: 100,
+          currentStep: 'AI分析完成！'
+        });
+
+        // 3秒后自动隐藏进度条，保留结果显示
+        setTimeout(() => {
+          setAiAnalysisVisible(false);
+        }, 3000);
+      } else {
+        throw new Error(aiResult?.error || 'AI分析返回无效结果');
+      }
+    } catch (error) {
+      console.error('AI分析失败:', error);
+      setAiError(error instanceof Error ? error.message : 'AI分析失败，请稍后重试');
+      setAiProcessingState({
+        status: 'error',
+        progress: 0,
+        currentStep: 'AI分析失败'
+      });
+    }
+  };
+
+  // 取消AI分析
+  const handleCancelAIAnalysis = () => {
+    setAiAnalysisVisible(false);
+    setAiProcessingState({
+      status: 'idle',
+      progress: 0,
+      currentStep: ''
+    });
+    setAiError('');
+  };
+
   // 重新分析
   const reAnalyze = (keyword: string) => {
     router.push(`/analysis?keyword=${encodeURIComponent(keyword)}`);
+  };
+
+  // 保存分析记录
+  const saveAnalysisRecord = async () => {
+    if (!detail) return;
+
+    setIsSaving(true);
+    setSaveStatus('idle');
+    setSaveMessage('');
+
+    try {
+      const response = await fetch('/api/search-history', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          keyword: detail.keyword,
+          articles: detail.articles,
+          wordCloud: detail.wordCloud,
+          insights: detail.insights,
+          // 这里可以添加AI洞察数据
+          // aiInsights: aiInsights || null
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setSaveStatus('success');
+        setSaveMessage('分析记录已成功保存到数据库');
+        // 3秒后重置状态
+        setTimeout(() => {
+          setSaveStatus('idle');
+          setSaveMessage('');
+        }, 3000);
+      } else {
+        setSaveStatus('error');
+        setSaveMessage(result.error || '保存失败，请稍后重试');
+        console.error('Save failed:', result.error);
+      }
+    } catch (error) {
+      setSaveStatus('error');
+      setSaveMessage('网络错误，保存失败');
+      console.error('Error saving analysis record:', error);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // 导出分析报告
@@ -289,6 +487,13 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
     loadAnalysisDetail();
   }, [id]);
 
+  useEffect(() => {
+    // 当detail加载完成后，尝试加载AI洞察
+    if (detail) {
+      loadAIInsights(detail.id);
+    }
+  }, [detail]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -355,6 +560,54 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
             <RefreshCwIcon className="w-4 h-4" />
             <span>重新分析</span>
           </button>
+
+          {/* AI深度分析按钮 */}
+          <button
+            onClick={handleAIAnalysis}
+            disabled={aiProcessingState.status === 'processing'}
+            className="btn bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+          >
+            <BrainIcon className="w-4 h-4" />
+            <span>
+              {aiProcessingState.status === 'processing' ? 'AI分析中...' : 'AI 深度分析'}
+            </span>
+          </button>
+
+          {/* 保存记录按钮 */}
+          <button
+            onClick={saveAnalysisRecord}
+            disabled={isSaving}
+            className={`btn flex items-center space-x-2 ${
+              saveStatus === 'success'
+                ? 'bg-green-500 hover:bg-green-600 text-white'
+                : saveStatus === 'error'
+                ? 'bg-red-500 hover:bg-red-600 text-white'
+                : 'btn-secondary'
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {isSaving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                <span>保存中...</span>
+              </>
+            ) : saveStatus === 'success' ? (
+              <>
+                <DatabaseIcon className="w-4 h-4" />
+                <span>已保存</span>
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <DatabaseIcon className="w-4 h-4" />
+                <span>保存失败</span>
+              </>
+            ) : (
+              <>
+                <SaveIcon className="w-4 h-4" />
+                <span>保存记录</span>
+              </>
+            )}
+          </button>
+
           <button
             onClick={exportReport}
             className="btn btn-secondary flex items-center space-x-2"
@@ -364,6 +617,38 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
           </button>
         </div>
       </div>
+
+      {/* 保存状态提示 */}
+      {saveMessage && (
+        <div className={`card ${
+          saveStatus === 'success' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+        }`}>
+          <div className="flex items-center space-x-3">
+            {saveStatus === 'success' ? (
+              <DatabaseIcon className="w-5 h-5 text-green-500" />
+            ) : (
+              <AlertCircleIcon className="w-5 h-5 text-red-500" />
+            )}
+            <p className={`text-sm ${
+              saveStatus === 'success' ? 'text-green-700' : 'text-red-700'
+            }`}>
+              {saveMessage}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* AI分析进度组件 */}
+      <AIAnalysisProgress
+        isVisible={aiAnalysisVisible}
+        progress={aiProcessingState.progress}
+        currentStep={aiProcessingState.currentStep}
+        error={aiError}
+        onCancel={handleCancelAIAnalysis}
+        searchId={currentAnalysisId}
+        totalArticles={detail ? Math.min(detail.articles.length, 5) : 0}
+        processedArticles={Math.min(Math.floor(aiProcessingState.progress / 20), detail ? Math.min(detail.articles.length, 5) : 0)}
+      />
 
       {/* 统计数据卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -606,38 +891,67 @@ export default function AnalysisDetailClient({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* AI洞察面板 - 临时禁用 */}
-      {/* <div className="mt-8">
+      {/* AI洞察面板 */}
+      <div className="mt-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-gray-900 flex items-center">
             <BrainIcon className="w-6 h-6 mr-2 text-purple-600" />
             AI智能洞察
           </h2>
           <div className="flex items-center space-x-3">
-            <CompactAIProcessingIndicator state={aiProcessingState} />
+            {aiProcessingState.status === 'processing' && (
+              <div className="flex items-center space-x-2 text-sm text-blue-600">
+                <RefreshCwIcon className="w-4 h-4 animate-spin" />
+                <span>AI分析中...</span>
+              </div>
+            )}
+            {aiProcessingState.status === 'completed' && (
+              <div className="flex items-center space-x-2 text-sm text-green-600">
+                <CheckCircleIcon className="w-4 h-4" />
+                <span>分析完成</span>
+              </div>
+            )}
+            {aiProcessingState.status === 'error' && (
+              <div className="flex items-center space-x-2 text-sm text-red-600">
+                <AlertCircleIcon className="w-4 h-4" />
+                <span>分析失败</span>
+              </div>
+            )}
             {!aiInsights && !aiError && aiProcessingState.status !== 'processing' && (
               <button
-                onClick={startAIAnalysis}
+                onClick={handleAIAnalysis}
                 className="btn btn-primary flex items-center space-x-2"
                 disabled={aiProcessingState.status === 'processing'}
               >
                 <BrainIcon className="w-4 h-4" />
-                <span>开始AI分析</span>
+                <span>AI 深度分析</span>
               </button>
             )}
           </div>
         </div>
 
-        <AIInsightsPanel
-          insights={aiInsights}
-          isLoading={aiProcessingState.status === 'processing'}
-          error={aiError}
-          onRetry={retryAIAnalysis}
-        />
+        {/* AI分析结果 */}
+        {(() => {
+          console.log('🔍 检查aiInsights状态:', {
+            aiInsights: !!aiInsights,
+            aiInsightsType: typeof aiInsights,
+            aiInsightsKeys: aiInsights ? Object.keys(aiInsights) : null,
+            hasBasicInsights: aiInsights?.basicInsights?.length || 0,
+            hasAiAnalysis: !!aiInsights?.aiAnalysis,
+            topicInsightsCount: aiInsights?.aiAnalysis?.topicInsights?.length || 0
+          });
+          return aiInsights && <AIInsightsDisplay insights={aiInsights} />;
+        })()}
       </div>
 
-      {/* AI处理指示器 */}
-      {/* <AIProcessingIndicator state={aiProcessingState} /> */}
+      {/* AI分析进度弹窗 */}
+      <AIAnalysisProgress
+        isOpen={aiAnalysisVisible}
+        processingState={aiProcessingState}
+        error={aiError}
+        onCancel={handleCancelAIAnalysis}
+        analysisId={currentAnalysisId}
+      />
 
       {/* 文章详情模态框 */}
       <ArticleDetail

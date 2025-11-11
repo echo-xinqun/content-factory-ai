@@ -74,6 +74,7 @@ export interface AIAnalysisRequest {
   searchId: string;
   keyword: string;
   articles: any[]; // ArticleData[]
+  onProgress?: (progress: number, step: string) => void; // 进度回调
   analysisOptions?: {
     maxArticles?: number;    // 最大分析文章数
     includeSentiment?: boolean;
@@ -130,6 +131,7 @@ export interface AIServiceConfig {
   timeout: number;
   retryAttempts: number;
   retryDelay: number;
+  provider?: 'openai' | 'deepseek' | 'custom';
 }
 
 // 洞察过滤选项
