@@ -208,28 +208,159 @@ export function initializeDatabase() {
     );
   `);
 
-  // 创建索引以提高查询性能
+  // 生成内容表
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_search_history_keyword ON search_history(keyword);
-    CREATE INDEX IF NOT EXISTS idx_search_history_search_time ON search_history(search_time DESC);
-    CREATE INDEX IF NOT EXISTS idx_articles_search_id ON articles(search_id);
-    CREATE INDEX IF NOT EXISTS idx_articles_title ON articles(title);
-    CREATE INDEX IF NOT EXISTS idx_word_clouds_search_id ON word_clouds(search_id);
-    CREATE INDEX IF NOT EXISTS idx_insights_search_id ON insights(search_id);
-
-    -- AI分析相关索引
-    CREATE INDEX IF NOT EXISTS idx_ai_analysis_results_search_id ON ai_analysis_results(search_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_analysis_results_created_at ON ai_analysis_results(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_topic_insights_search_id ON topic_insights(search_id);
-    CREATE INDEX IF NOT EXISTS idx_topic_insights_confidence ON topic_insights(confidence DESC);
-    CREATE INDEX IF NOT EXISTS idx_article_ai_summaries_search_id ON article_ai_summaries(search_id);
-    CREATE INDEX IF NOT EXISTS idx_article_ai_summaries_article_id ON article_ai_summaries(article_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_sentiment_analysis_search_id ON ai_sentiment_analysis(search_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_opportunities_search_id ON ai_opportunities(search_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_analysis_tasks_status ON ai_analysis_tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_ai_analysis_tasks_search_id ON ai_analysis_tasks(search_id);
-    CREATE INDEX IF NOT EXISTS idx_ai_analysis_cache_expires_at ON ai_analysis_cache(expires_at);
+    CREATE TABLE IF NOT EXISTS generated_content (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      search_id INTEGER,
+      insight_source TEXT NOT NULL DEFAULT 'ai_insight', -- 'ai_insight' | 'custom'
+      selected_topic TEXT NOT NULL,
+      generated_title TEXT,
+      generated_content TEXT NOT NULL,
+      selected_images TEXT, -- JSON数组存储选中的图片
+      image_style TEXT DEFAULT 'tech', -- 'tech' | 'business' | 'education' | 'nature' | 'creative' | 'lifestyle'
+      generation_params TEXT, -- JSON对象存储生成参数
+      word_count INTEGER DEFAULT 0,
+      generation_time INTEGER DEFAULT 0, -- 生成耗时（毫秒）
+      ai_model TEXT DEFAULT 'deepseek-chat',
+      tokens_used INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'draft', -- 'draft' | 'published' | 'archived'
+      quality_score REAL DEFAULT 0, -- 内容质量评分 0-1
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+      updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (search_id) REFERENCES search_history (id) ON DELETE SET NULL
+    );
   `);
+
+  // 创建索引以提高查询性能
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_search_history_keyword ON search_history(keyword);`);
+  } catch (e) {
+    console.log('Table search_history does not exist or missing keyword column, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_search_history_search_time ON search_history(search_time DESC);`);
+  } catch (e) {
+    console.log('Table search_history does not exist or missing search_time column, skipping index creation');
+  }
+
+  // 只有当表存在时才创建索引
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_articles_search_id ON articles(search_id);`);
+  } catch (e) {
+    console.log('Table articles does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_articles_title ON articles(title);`);
+  } catch (e) {
+    console.log('Table articles does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_word_clouds_search_id ON word_clouds(search_id);`);
+  } catch (e) {
+    console.log('Table word_clouds does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_insights_search_id ON insights(search_id);`);
+  } catch (e) {
+    console.log('Table insights does not exist, skipping index creation');
+  }
+
+  // AI分析相关索引
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_analysis_results_search_id ON ai_analysis_results(search_id);`);
+  } catch (e) {
+    console.log('Table ai_analysis_results does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_analysis_results_created_at ON ai_analysis_results(created_at DESC);`);
+  } catch (e) {
+    console.log('Table ai_analysis_results does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_topic_insights_search_id ON topic_insights(search_id);`);
+  } catch (e) {
+    console.log('Table topic_insights does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_topic_insights_confidence ON topic_insights(confidence DESC);`);
+  } catch (e) {
+    console.log('Table topic_insights does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_article_ai_summaries_search_id ON article_ai_summaries(search_id);`);
+  } catch (e) {
+    console.log('Table article_ai_summaries does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_article_ai_summaries_article_id ON article_ai_summaries(article_id);`);
+  } catch (e) {
+    console.log('Table article_ai_summaries does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_sentiment_analysis_search_id ON ai_sentiment_analysis(search_id);`);
+  } catch (e) {
+    console.log('Table ai_sentiment_analysis does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_opportunities_search_id ON ai_opportunities(search_id);`);
+  } catch (e) {
+    console.log('Table ai_opportunities does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_analysis_tasks_status ON ai_analysis_tasks(status);`);
+  } catch (e) {
+    console.log('Table ai_analysis_tasks does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_analysis_tasks_search_id ON ai_analysis_tasks(search_id);`);
+  } catch (e) {
+    console.log('Table ai_analysis_tasks does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ai_analysis_cache_expires_at ON ai_analysis_cache(expires_at);`);
+  } catch (e) {
+    console.log('Table ai_analysis_cache does not exist, skipping index creation');
+  }
+
+  // 生成内容相关索引
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_generated_content_topic_id ON generated_content(topic_id);`);
+  } catch (e) {
+    console.log('Table generated_content does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_generated_content_status ON generated_content(status);`);
+  } catch (e) {
+    console.log('Table generated_content does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_generated_content_created_at ON generated_content(created_at DESC);`);
+  } catch (e) {
+    console.log('Table generated_content does not exist, skipping index creation');
+  }
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_generated_content_insights_reference ON generated_content(insights_reference);`);
+  } catch (e) {
+    console.log('Table generated_content does not have insights_reference column, skipping index creation');
+  }
 
   console.log('Database initialized successfully');
 
@@ -297,6 +428,11 @@ export function getDatabaseStats() {
     cachedResults: cachedCount.count,
     activeTasks: activeTasksCount.count
   };
+}
+
+// 获取数据库实例
+export function getDatabase() {
+  return db;
 }
 
 export default db;

@@ -10,7 +10,12 @@
       "Bash(findstr:*)",
       "Bash(cmd:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(find:*)",
+      "Bash(powershell:*)",
+      "Bash(rm:*)",
+      "Bash(nul:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,10 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   EditIcon,
   EyeIcon,
-  SendIcon,
   TrashIcon,
   SearchIcon,
   FilterIcon,
@@ -12,50 +11,7 @@ import {
   ClockIcon,
   XCircleIcon
 } from 'lucide-react';
-
-// 模拟文章数据
-const mockArticles = [
-  {
-    id: '1',
-    title: 'AI技术在医疗领域的应用前景分析',
-    status: { type: 'draft', label: '草稿', color: 'gray' },
-    createdAt: '2024-01-15',
-    updatedAt: '2024-01-15',
-    platforms: []
-  },
-  {
-    id: '2',
-    title: '2024年人工智能发展趋势预测',
-    status: { type: 'pending', label: '待发布', color: 'yellow' },
-    createdAt: '2024-01-14',
-    updatedAt: '2024-01-14',
-    platforms: ['xiaohongshu', 'wechat']
-  },
-  {
-    id: '3',
-    title: '机器学习在金融风控中的实践',
-    status: { type: 'published', label: '已发布', color: 'green' },
-    createdAt: '2024-01-13',
-    updatedAt: '2024-01-13',
-    platforms: ['xiaohongshu', 'wechat', 'douyin']
-  },
-  {
-    id: '4',
-    title: '深度学习框架对比分析',
-    status: { type: 'published', label: '已发布', color: 'green' },
-    createdAt: '2024-01-12',
-    updatedAt: '2024-01-12',
-    platforms: ['wechat']
-  },
-  {
-    id: '5',
-    title: 'AI芯片技术发展现状与展望',
-    status: { type: 'failed', label: '发布失败', color: 'red' },
-    createdAt: '2024-01-11',
-    updatedAt: '2024-01-11',
-    platforms: ['xiaohongshu']
-  }
-];
+import PlatformIcon from './PlatformIcons';
 
 const platforms = [
   { id: 'xiaohongshu', name: '小红书', color: 'red' },
@@ -73,11 +29,38 @@ const statusFilters = [
 ];
 
 export default function Publish() {
-  const [articles, setArticles] = useState(mockArticles);
+  const [articles, setArticles] = useState([]);
   const [selectedArticles, setSelectedArticles] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState('date');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 加载文章数据
+  useEffect(() => {
+    loadArticles();
+  }, []);
+
+  const loadArticles = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/articles');
+      const data = await response.json();
+
+      if (data.success) {
+        setArticles(data.data);
+      } else {
+        console.error('加载文章失败:', data.error);
+        // 如果加载失败，显示空数组而不是错误页面
+        setArticles([]);
+      }
+    } catch (error) {
+      console.error('加载文章失败:', error);
+      setArticles([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // 过滤和排序文章
   const filteredArticles = articles
@@ -89,7 +72,7 @@ export default function Publish() {
     .sort((a, b) => {
       switch (sortBy) {
         case 'date':
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
         case 'title':
           return a.title.localeCompare(b.title);
         case 'status':
@@ -120,17 +103,65 @@ export default function Publish() {
   };
 
   const handleEdit = (articleId: string) => {
-    alert(`编辑文章: ${articleId}`);
+    // 跳转到编辑页面
+    window.location.href = `/edit/${articleId}`;
   };
 
   const handleView = (articleId: string) => {
-    alert(`查看文章: ${articleId}`);
+    // 实现预览功能 - 打开预览模态框或新页面
+    const article = articles.find(a => a.id === articleId);
+    if (article) {
+      // 创建一个预览窗口
+      const previewWindow = window.open('', '_blank', 'width=800,height=600');
+      if (previewWindow) {
+        previewWindow.document.write(`
+          <html>
+            <head>
+              <title>${article.title} - 预览</title>
+              <meta charset="utf-8">
+              <style>
+                body { font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }
+                h1 { color: #333; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+                .meta { color: #666; font-size: 14px; margin-bottom: 20px; }
+                .status { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+                .draft { background: #f0f0f0; color: #666; }
+                .published { background: #d4edda; color: #155724; }
+                .archived { background: #fff3cd; color: #856404; }
+              </style>
+            </head>
+            <body>
+              <h1>${article.title}</h1>
+              <div class="meta">
+                <span class="status ${article.status.type}">${article.status.label}</span>
+                <span style="margin-left: 10px;">创建时间: ${article.createdAt}</span>
+                <span style="margin-left: 10px;">更新时间: ${article.updatedAt}</span>
+              </div>
+              <div>${article.content}</div>
+            </body>
+          </html>
+        `);
+        previewWindow.document.close();
+      }
+    }
   };
 
-  const handleDelete = (articleId: string) => {
+  const handleDelete = async (articleId: string) => {
     if (confirm('确定要删除这篇文章吗？')) {
-      setArticles(prev => prev.filter(article => article.id !== articleId));
-      setSelectedArticles(prev => prev.filter(id => id !== articleId));
+      try {
+        const response = await fetch(`/api/articles/${articleId}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          setArticles(prev => prev.filter(article => article.id !== articleId));
+          setSelectedArticles(prev => prev.filter(id => id !== articleId));
+        } else {
+          alert('删除失败，请重试');
+        }
+      } catch (error) {
+        console.error('删除文章失败:', error);
+        alert('删除失败，请重试');
+      }
     }
   };
 
@@ -245,114 +276,121 @@ export default function Publish() {
 
       {/* 文章列表 */}
       <div className="card">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-4">
-                  <input
-                    type="checkbox"
-                    checked={selectedArticles.length === filteredArticles.length && filteredArticles.length > 0}
-                    onChange={handleSelectAll}
-                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
-                </th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900">标题</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900">状态</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900">发布平台</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900">创建时间</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredArticles.map((article) => (
-                <tr key={article.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            <span className="ml-3 text-gray-600">正在加载文章...</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-4">
                     <input
                       type="checkbox"
-                      checked={selectedArticles.includes(article.id)}
-                      onChange={() => handleSelectArticle(article.id)}
+                      checked={selectedArticles.length === filteredArticles.length && filteredArticles.length > 0}
+                      onChange={handleSelectAll}
                       className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                     />
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="max-w-xs">
-                      <p className="text-sm font-medium text-gray-900 truncate">{article.title}</p>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4">
-                    {getStatusBadge(article.status)}
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex flex-wrap gap-1">
-                      {article.platforms.length > 0 ? (
-                        article.platforms.map(platformId => (
-                          <div key={platformId}>
-                            {getPlatformBadge(platformId)}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="text-gray-400 text-xs">未发布</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-3 px-4 text-sm text-gray-600">
-                    {article.createdAt}
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleEdit(article.id)}
-                        className="p-1 text-gray-600 hover:text-primary-600 transition-colors"
-                        title="编辑"
-                      >
-                        <EditIcon className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleView(article.id)}
-                        className="p-1 text-gray-600 hover:text-primary-600 transition-colors"
-                        title="查看"
-                      >
-                        <EyeIcon className="w-4 h-4" />
-                      </button>
-
-                      {article.status.type === 'draft' || article.status.type === 'pending' ? (
-                        <div className="flex items-center space-x-1">
-                          {platforms.map(platform => (
-                            <button
-                              key={platform.id}
-                              onClick={() => handlePublish(article.id, platform.id)}
-                              className="p-1 text-gray-600 hover:text-primary-600 transition-colors"
-                              title={`发布到${platform.name}`}
-                            >
-                              <SendIcon className="w-4 h-4" />
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      <button
-                        onClick={() => handleDelete(article.id)}
-                        className="p-1 text-gray-600 hover:text-red-600 transition-colors"
-                        title="删除"
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
+                  </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">标题</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">状态</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">发布平台</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">创建时间</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredArticles.map((article) => (
+                  <tr key={article.id} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-3 px-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedArticles.includes(article.id)}
+                        onChange={() => handleSelectArticle(article.id)}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="max-w-xs">
+                        <p className="text-sm font-medium text-gray-900 truncate">{article.title}</p>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      {getStatusBadge(article.status)}
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex flex-wrap gap-1">
+                        {article.platforms.length > 0 ? (
+                          article.platforms.map(platformId => (
+                            <div key={platformId}>
+                              {getPlatformBadge(platformId)}
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-gray-400 text-xs">未发布</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-gray-600">
+                      {article.createdAt}
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleEdit(article.id)}
+                          className="p-1 text-gray-600 hover:text-primary-600 transition-colors"
+                          title="编辑"
+                        >
+                          <EditIcon className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleView(article.id)}
+                          className="p-1 text-gray-600 hover:text-primary-600 transition-colors"
+                          title="预览"
+                        >
+                          <EyeIcon className="w-4 h-4" />
+                        </button>
 
-        {filteredArticles.length === 0 && (
+                        {article.status.type === 'draft' || article.status.type === 'pending' ? (
+                          <div className="flex items-center space-x-1">
+                            {platforms.map(platform => (
+                              <button
+                                key={platform.id}
+                                onClick={() => handlePublish(article.id, platform.id)}
+                                className="p-1 text-gray-600 hover:text-primary-600 transition-colors flex items-center justify-center"
+                                title={`发布到${platform.name}`}
+                              >
+                                <PlatformIcon platformId={platform.id} className="w-4 h-4" />
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <button
+                          onClick={() => handleDelete(article.id)}
+                          className="p-1 text-gray-600 hover:text-red-600 transition-colors"
+                          title="删除"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {filteredArticles.length === 0 && !isLoading && (
           <div className="text-center py-8">
             <p className="text-gray-600">没有找到符合条件的文章</p>
           </div>
         )}
 
-        {selectedArticles.length > 0 && (
+        {selectedArticles.length > 0 && !isLoading && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-600">
